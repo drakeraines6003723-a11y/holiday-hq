@@ -1,0 +1,366 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Holiday HQ</title>
+<style>
+:root{--bg:#151e1b;--panel:#24332d;--accent:#e7aa72;--text:#fff8ed}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text)}
+header{padding:22px;background:var(--panel);display:flex;justify-content:space-between;align-items:center;gap:12px}
+h1{margin:0;font-size:25px}
+h2{margin:8px 0 18px}
+small,.muted{opacity:.7}
+button,input,select,textarea{font:inherit}
+button{cursor:pointer}
+button,.btn{border:0;border-radius:11px;padding:11px 15px;background:var(--accent);color:#18201d;font-weight:650}
+nav{display:flex;gap:7px;overflow-x:auto;padding:13px;background:#0002}
+nav button{white-space:nowrap;background:var(--panel);color:var(--text)}
+nav button.active{background:var(--accent);color:#18201d}
+main{max-width:1100px;margin:auto;padding:22px 16px 90px}
+.card{background:var(--panel);padding:20px;border-radius:18px;margin:12px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:12px}
+.grid .card{margin:0}
+input,select,textarea{width:100%;padding:12px;background:var(--bg);color:var(--text);border:1px solid #ffffff35;border-radius:10px}
+label{display:block;margin:12px 0 5px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.item{padding:13px;border-bottom:1px solid #ffffff22}
+.item:last-child{border:0}
+.item img{width:90px;height:75px;object-fit:cover;border-radius:10px}
+.item button{margin:5px 4px 0 0}
+.secondary{background:#ffffff20;color:var(--text)}
+.danger{background:#9c4646;color:white}
+.shelf{min-height:120px;text-align:left}
+.shelf strong{font-size:27px;display:block}
+dialog{border:1px solid #ffffff33;border-radius:20px;background:var(--panel);color:var(--text);width:min(550px,95vw);max-height:90vh;overflow:auto;padding:24px}
+dialog::backdrop{background:#000a}
+progress{width:100%;accent-color:var(--accent)}
+@media(max-width:600px){header{padding:15px}h1{font-size:21px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}main{padding:15px 12px 90px}}
+@media print{header,nav,main,dialog{display:none!important}#printArea{display:block!important;color:black;background:white}}
+#printArea{display:none}
+</style>
+</head>
+<body>
+<header>
+<div><h1>✦ Holiday HQ</h1><small>Your seasons, organized.</small></div>
+<select id="theme" style="width:auto" onchange="changeTheme(this.value)">
+<option>Fall</option><option>Christmas</option><option>Easter</option><option>Halloween</option>
+</select>
+</header>
+<nav id="nav"></nav>
+<main id="app"></main>
+<dialog id="dialog">
+<h2 id="dialogTitle">Add</h2>
+<form id="form"></form>
+</dialog>
+<div id="printArea"></div>
+
+<script>
+const KEY="holiday-hq-complete-v1";
+const holidays=["Fall","Christmas","Easter","Halloween"];
+const rooms=["Living Room","Kitchen","Dining Room","Bedroom","Spare Bedroom","Bathroom","Porch","Yard","Other"];
+const pages=["Dashboard","Inventory","Rooms","Storage","Planner","Packing","Lights","Calendar","Tasks","Wishlist","Budget","Memories","Settings"];
+const defaults=()=>({
+ theme:"Fall",inventory:[],bins:[],lights:[],events:[],
+ tasks:[],wishlist:[],expenses:[],memories:[],
+ packing:{},plans:[],shelves:Array.from({length:8},(_,i)=>({id:i+1,notes:""}))
+});
+let data;
+try{data=Object.assign(defaults(),JSON.parse(localStorage.getItem(KEY)||"{}"))}
+catch{data=defaults()}
+let page="Dashboard",editing=null,kind="",photo="";
+let selectedHoliday="Fall",selectedRoom="All";
+const $=id=>document.getElementById(id);
+const uid=()=>crypto.randomUUID();
+const safe=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const options=(a,v)=>a.map(x=>`<option ${x===v?"selected":""}>${safe(x)}</option>`).join("");
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(data))}catch{alert("Storage is full. Export a backup and reduce photo sizes.")}};
+const money=n=>"$"+Number(n||0).toFixed(2);
+function changeTheme(t){
+ data.theme=t;
+ const colors={
+ Fall:["#151e1b","#24332d","#e7aa72"],
+ Christmas:["#101f1b","#204437","#dfbf80"],
+ Easter:["#211b2d","#39304c","#c6a5ee"],
+ Halloween:["#201725","#392842","#f3a05e"]
+ };
+ const c=colors[t]||colors.Fall;
+ ["--bg","--panel","--accent"].forEach((k,i)=>document.documentElement.style.setProperty(k,c[i]));
+ $("theme").value=t;save();render();
+}
+function navigate(p){page=p;render();window.scrollTo(0,0)}
+function btn(t,fn,cls=""){return `<button class="${cls}" onclick="${fn}">${t}</button>`}
+function render(){
+ $("nav").innerHTML=pages.map(p=>`<button class="${page===p?"active":""}" onclick="navigate('${p}')">${p}</button>`).join("");
+ $("app").innerHTML=views[page]();
+}
+function title(t,action=""){return `<div class="row"><h2>${t}</h2>${action}</div>`}
+function empty(t){return `<div class="card muted">${t}</div>`}
+function itemCard(obj,detail,type){
+ return `<div class="item"><div class="row">
+ <div>${obj.photo?`<img src="${obj.photo}">`:""}
+ <strong>${safe(obj.name||obj.title)}</strong>
+ <div class="muted">${detail}</div></div>
+ <div>${btn("Edit",`editItem('${type}','${obj.id}')`,"secondary")}
+ ${btn("Delete",`removeItem('${type}','${obj.id}')`,"danger")}</div>
+ </div></div>`
+}
+function dashboard(){
+ const shown=data.inventory.filter(x=>x.status==="Displayed").length;
+ return `<div class="card"><h2>✨ Welcome to Holiday HQ</h2>
+ <p>Plan every holiday, find every decoration, and organize your entire home.</p>
+ ${btn("＋ Add Decoration","addItem('inventory')")}
+ ${btn("Plan Decorating","navigate('Planner')","secondary")}</div>
+ <div class="grid">
+ ${[[data.inventory.length,"Decorations"],[shown,"Displayed"],[data.bins.length,"Storage bins"],[data.tasks.filter(x=>x.done).length,"Completed tasks"]].map(x=>`<div class="card"><h2>${x[0]}</h2><small>${x[1]}</small></div>`).join("")}
+ </div>
+ ${title("Your holidays")}
+ <div class="grid">${holidays.map(h=>`<button class="card" style="color:var(--text);text-align:left" onclick="selectedHoliday='${h}';navigate('Inventory')"><h2>${{Fall:"🍂",Christmas:"🎄",Easter:"🐣",Halloween:"🎃"}[h]} ${h}</h2><small>${data.inventory.filter(x=>x.holiday===h).length} decorations</small></button>`).join("")}</div>
+ ${title("Upcoming events")}
+ <div class="card">${data.events.filter(x=>x.date>=new Date().toISOString().slice(0,10)).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5).map(x=>`<div class="item">${safe(x.date)} — ${safe(x.title)}</div>`).join("")||"No upcoming events"}</div>`;
+}
+function inventory(){
+ const a=data.inventory.filter(x=>(selectedHoliday==="All"||x.holiday===selectedHoliday)&&(selectedRoom==="All"||x.room===selectedRoom));
+ return `${title("Decoration Inventory",btn("＋ Decoration","addItem('inventory')"))}
+ <div class="card"><div class="grid">
+ <select onchange="selectedHoliday=this.value;render()">${options(["All",...holidays],selectedHoliday)}</select>
+ <select onchange="selectedRoom=this.value;render()">${options(["All",...rooms],selectedRoom)}</select></div></div>
+ <div class="card">${a.map(x=>itemCard(x,`${safe(x.holiday)} · ${safe(x.room)} · ${safe(x.location||"")}<br>Bin: ${safe(x.bin||"Unassigned")} · ${safe(x.status||"Stored")} · ID: ${safe(x.code||x.id.slice(0,8))}`,"inventory")).join("")||"No decorations yet. Add your first one!"}</div>`;
+}
+function roomView(){
+ return `${title("Room Planner")}
+ <div class="grid">${rooms.map(r=>{
+ const items=data.inventory.filter(x=>x.room===r);
+ return `<div class="card"><h3>${r}</h3><p class="muted">${items.length} decorations</p>
+ ${items.map(x=>`<div class="item">${safe(x.name)}<br><small>${safe(x.location||"Location not set")}</small></div>`).join("")}
+ ${btn("Add Decoration",`addItem('inventory','${r}')`,"secondary")}</div>`;
+ }).join("")}</div>`;
+}
+function storage(){
+ return `${title("Garage Storage",btn("＋ Add Bin","addItem('bins')"))}
+ <p class="muted">Your eight spaces run left to right, top to bottom.</p>
+ <div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+ ${data.shelves.map(s=>`<button class="card shelf" onclick="showShelf(${s.id})"><strong>${s.id}</strong><small>${data.bins.filter(b=>Number(b.shelf)===s.id).length} bins</small></button>`).join("")}</div>
+ ${title("All Bins")}
+ <div class="card">${data.bins.map(b=>itemCard(b,`Shelf ${safe(b.shelf)} · ${safe(b.holiday)} · ${data.inventory.filter(x=>x.bin===b.name).length} items`,"bins")).join("")||"No bins added"}</div>`;
+}
+function showShelf(n){
+ const bins=data.bins.filter(b=>Number(b.shelf)===n);
+ $("dialogTitle").textContent="Shelf "+n;
+ $("form").innerHTML=`<p>${bins.length?bins.map(b=>`<strong>${safe(b.name)}</strong><br>${data.inventory.filter(x=>x.bin===b.name).map(x=>safe(x.name)).join(", ")||"Empty"}<br><br>`).join(""):"No bins assigned yet."}</p>
+ ${btn("Close","document.getElementById('dialog').close()","secondary")}`;
+ $("dialog").showModal();
+}
+function planner(){
+ return `${title("Smart Decorating Planner")}
+ <div class="card"><label>Holiday</label><select id="planHoliday">${options(holidays,data.theme)}</select>
+ <label>Time available (minutes)</label><input id="planTime" type="number" min="10" value="90">
+ <label>Rooms (hold Ctrl/Command to select multiple)</label>
+ <select id="planRooms" multiple size="7">${rooms.map(r=>`<option selected>${r}</option>`).join("")}</select>
+ <p>${btn("✨ Generate Plan","generatePlan()")}</p></div>
+ ${title("Saved Plans")}
+ ${data.plans.slice().reverse().map(p=>`<div class="card"><h3>${safe(p.holiday)} · ${p.minutes} minutes</h3><small>${safe(p.created)}</small>
+ ${p.items.map(x=>`<div class="item"><input type="checkbox" style="width:auto" ${x.done?"checked":""} onchange="planCheck('${p.id}','${x.id}',this.checked)"> ${safe(x.name)} — ${safe(x.room)}</div>`).join("")}
+ ${btn("Delete Plan",`removeItem('plans','${p.id}')`,"danger")}</div>`).join("")}`;
+}
+function generatePlan(){
+ const h=$("planHoliday").value,m=Math.max(10,Number($("planTime").value)||90);
+ const rs=Array.from($("planRooms").selectedOptions).map(x=>x.value);
+ const matches=data.inventory.filter(x=>x.holiday===h&&rs.includes(x.room));
+ if(!matches.length){alert("Add decorations for those rooms first.");return}
+ const count=Math.max(1,Math.floor(m/5));
+ const items=matches.slice(0,count).map(x=>({id:uid(),name:x.name,room:x.room,done:false}));
+ data.plans.push({id:uid(),holiday:h,minutes:m,created:new Date().toLocaleDateString(),items});
+ save();render();
+}
+function planCheck(pid,id,checked){
+ const p=data.plans.find(x=>x.id===pid);
+ const x=p?.items.find(x=>x.id===id);if(x)x.done=checked;save();
+}
+function packing(){
+ const a=data.inventory.filter(x=>x.holiday===selectedHoliday);
+ const done=a.filter(x=>data.packing[x.id]).length;
+ return `${title("Smart Packing Mode")}
+ <div class="card"><select onchange="selectedHoliday=this.value;render()">${options(holidays,selectedHoliday)}</select>
+ <p>${done} / ${a.length} packed</p><progress value="${done}" max="${a.length||1}"></progress></div>
+ <div class="card">${a.map(x=>`<div class="item">
+ <label><input type="checkbox" style="width:auto" ${data.packing[x.id]?"checked":""} onchange="pack('${x.id}',this.checked)">
+ <strong>${safe(x.name)}</strong></label>
+ <small>Bin: ${safe(x.bin||"Unassigned")} · Shelf: ${safe(data.bins.find(b=>b.name===x.bin)?.shelf||"Unknown")}</small>
+ </div>`).join("")||"No decorations for this holiday yet."}</div>`;
+}
+function pack(id,checked){
+ data.packing[id]=checked;
+ const x=data.inventory.find(x=>x.id===id);
+ if(x)x.status=checked?"Stored":"Displayed";
+ save();render();
+}
+function lights(){
+ return `${title("Christmas Light Manager",btn("＋ Add Light","addItem('lights')"))}
+ <div class="card">${data.lights.map(x=>itemCard(x,`${safe(x.location)} · ${safe(x.color)} · ${safe(x.rating)} · ${safe(x.condition)} · Bin: ${safe(x.bin||"Unassigned")}`,"lights")).join("")||"Add your spotlights and Christmas light strands."}</div>`;
+}
+let month=new Date();
+function calendar(){
+ const y=month.getFullYear(),m=month.getMonth(),first=new Date(y,m,1).getDay(),days=new Date(y,m+1,0).getDate();
+ return `${title("Holiday Calendar",btn("＋ Event","addItem('events')"))}
+ <div class="card"><div class="row">${btn("←","month.setMonth(month.getMonth()-1);render()","secondary")}
+ <h3>${month.toLocaleString("en-US",{month:"long",year:"numeric"})}</h3>
+ ${btn("→","month.setMonth(month.getMonth()+1);render()","secondary")}</div>
+ <div class="grid" style="grid-template-columns:repeat(7,minmax(0,1fr));gap:4px">
+ ${["S","M","T","W","T","F","S"].map(x=>`<small>${x}</small>`).join("")}
+ ${Array.from({length:first},()=>"<div></div>").join("")}
+ ${Array.from({length:days},(_,i)=>{
+ const date=`${y}-${String(m+1).padStart(2,"0")}-${String(i+1).padStart(2,"0")}`;
+ const e=data.events.filter(x=>x.date===date);
+ return `<div style="min-height:65px;background:var(--bg);padding:5px;border-radius:8px"><strong>${i+1}</strong>${e.map(x=>`<div style="font-size:10px;color:var(--accent)">${safe(x.title)}</div>`).join("")}</div>`;
+ }).join("")}</div></div>
+ ${data.events.map(x=>`<div class="card">${itemCard(x,`${safe(x.date)} · ${safe(x.holiday)}`,"events")}</div>`).join("")}`;
+}
+function tasks(){
+ return `${title("Tasks",btn("＋ Task","addItem('tasks')"))}
+ <div class="card">${data.tasks.map(x=>`<div class="item row"><label><input type="checkbox" style="width:auto" ${x.done?"checked":""} onchange="toggleTask('${x.id}',this.checked)"> ${safe(x.title)}</label>
+ ${btn("Delete",`removeItem('tasks','${x.id}')`,"danger")}</div>`).join("")||"No tasks yet."}</div>`;
+}
+function toggleTask(id,v){const x=data.tasks.find(x=>x.id===id);if(x)x.done=v;save();render()}
+function wishlist(){
+ return `${title("Shopping Wishlist",btn("＋ Wish","addItem('wishlist')"))}
+ <div class="card">${data.wishlist.map(x=>itemCard(x,`${safe(x.holiday)} · ${money(x.price)} · ${safe(x.store||"")}`,"wishlist")).join("")||"Your wishlist is empty."}</div>`;
+}
+function budget(){
+ const total=data.expenses.reduce((s,x)=>s+Number(x.amount||0),0);
+ return `${title("Holiday Budget",btn("＋ Expense","addItem('expenses')"))}
+ <div class="card"><h2>${money(total)}</h2><small>Total spending recorded</small></div>
+ <div class="card">${data.expenses.map(x=>itemCard(x,`${safe(x.holiday)} · ${money(x.amount)} · ${safe(x.date||"")}`,"expenses")).join("")||"No expenses yet."}</div>`;
+}
+function memories(){
+ return `${title("Holiday Memories",btn("＋ Memory","addItem('memories')"))}
+ <div class="grid">${data.memories.map(x=>`<div class="card">
+ ${x.photo?`<img src="${x.photo}" style="width:100%;border-radius:12px">`:""}
+ <h3>${safe(x.title)}</h3><small>${safe(x.holiday)} · ${safe(x.year)}</small>
+ <p>${safe(x.notes||"")}</p>
+ ${btn("Delete",`removeItem('memories','${x.id}')`,"danger")}
+ </div>`).join("")}</div>`;
+}
+function settings(){
+ return `${title("Settings & Backups")}
+ <div class="card"><h3>💾 JSON Backup</h3>
+ <p>Export your inventory regularly. Your browser stores this data locally; it does not automatically sync between devices.</p>
+ ${btn("Export Backup","exportBackup()")}
+ <label>Import Backup</label><input type="file" accept=".json,application/json" onchange="importBackup(this.files[0])"></div>
+ <div class="card"><h3>QR Code Storage Labels</h3>
+ <p>Generate printable QR labels for each bin. QR links open Holiday HQ with the bin ID in the URL.</p>
+ ${data.bins.map(x=>`<div class="item row"><strong>${safe(x.name)} · Shelf ${safe(x.shelf)}</strong>
+ ${btn("Print QR",`printQR('${x.id}')`)}</div>`).join("")||"Add a storage bin first."}</div>`;
+}
+function exportBackup(){
+ const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+ const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+ a.download="holiday-hq-backup.json";a.click();URL.revokeObjectURL(a.href);
+}
+async function importBackup(file){
+ if(!file)return;
+ try{
+ const obj=JSON.parse(await file.text());
+ if(!Array.isArray(obj.inventory)||!Array.isArray(obj.bins))throw Error("Invalid backup");
+ if(!confirm("Replace current data with this backup?"))return;
+ data=Object.assign(defaults(),obj);save();changeTheme(data.theme);render();
+ }catch(e){alert("Could not import backup: "+e.message)}
+}
+function printQR(id){
+ const b=data.bins.find(x=>x.id===id);if(!b)return;
+ const url=new URL(location.href);url.searchParams.set("bin",id);
+ const qr="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data="+encodeURIComponent(url.href);
+ $("printArea").innerHTML=`<h1>Holiday HQ</h1><h2>${safe(b.name)}</h2><p>Shelf ${safe(b.shelf)} · ${safe(b.holiday)}</p><img src="${qr}"><p>Scan to view bin</p>`;
+ const img=$("printArea").querySelector("img");
+ img.onload=()=>window.print();
+ img.onerror=()=>alert("QR service unavailable. Check your internet connection.");
+}
+const fields={
+ inventory:[["name","Decoration Name"],["holiday","Holiday","holiday"],["room","Display Room","room"],["location","Exact Placement"],["bin","Storage Bin","bin"],["status","Status","status"],["notes","Notes"],["photo","Photo","photo"]],
+ bins:[["name","Bin Name"],["holiday","Holiday","holiday"],["shelf","Shelf Number","shelf"],["notes","Contents / Notes"]],
+ lights:[["name","Light Name"],["location","Display Location"],["color","Color"],["rating","Indoor / Outdoor","rating"],["condition","Condition","condition"],["bin","Storage Bin","bin"],["notes","Notes"]],
+ events:[["title","Event Name"],["date","Date","date"],["holiday","Holiday","holiday"],["notes","Notes"]],
+ tasks:[["title","Task"],["holiday","Holiday","holiday"],["notes","Notes"]],
+ wishlist:[["name","Item"],["holiday","Holiday","holiday"],["price","Estimated Price","number"],["store","Store"]],
+ expenses:[["name","Purchase"],["holiday","Holiday","holiday"],["amount","Amount","number"],["date","Date","date"]],
+ memories:[["title","Memory Title"],["holiday","Holiday","holiday"],["year","Year","number"],["notes","Notes"],["photo","Photo","photo"]]
+};
+function fieldHTML(f,x){
+ const [key,label,type]=f,value=x[key]||"";
+ let input="";
+ if(type==="holiday")input=`<select name="${key}">${options(holidays,value||data.theme)}</select>`;
+ else if(type==="room")input=`<select name="${key}">${options(rooms,value||rooms[0])}</select>`;
+ else if(type==="bin")input=`<select name="${key}">${options(["",...data.bins.map(b=>b.name)],value)}</select>`;
+ else if(type==="shelf")input=`<select name="${key}">${options(["1","2","3","4","5","6","7","8"],String(value||1))}</select>`;
+ else if(type==="status")input=`<select name="${key}">${options(["Stored","Displayed","Missing","Damaged"],value||"Stored")}</select>`;
+ else if(type==="rating")input=`<select name="${key}">${options(["Indoor","Outdoor","Indoor/Outdoor"],value||"Outdoor")}</select>`;
+ else if(type==="condition")input=`<select name="${key}">${options(["Working","Needs Repair","Broken"],value||"Working")}</select>`;
+ else if(type==="photo")input=`<input type="file" accept="image/*" onchange="readPhoto(this)">`;
+ else if(key==="notes")input=`<textarea name="${key}">${safe(value)}</textarea>`;
+ else input=`<input name="${key}" type="${type==="number"?"number":type==="date"?"date":"text"}" ${type==="number"?'step="0.01"':""} value="${safe(value)}" ${key==="name"||key==="title"?"required":""}>`;
+ return `<label>${label}</label>${input}`;
+}
+function addItem(type,room=""){
+ kind=type;editing=null;photo="";
+ openForm({room});
+}
+function editItem(type,id){
+ kind=type;editing=id;
+ const x=data[type].find(x=>x.id===id);
+ photo=x.photo||"";openForm(x);
+}
+function openForm(x){
+ $("dialogTitle").textContent=(editing?"Edit ":"Add ")+kind;
+ $("form").innerHTML=fields[kind].map(f=>fieldHTML(f,x)).join("")+
+ `<p class="row">${btn("Cancel","document.getElementById('dialog').close()","secondary")}<button type="submit">Save</button></p>`;
+ $("dialog").showModal();
+}
+function readPhoto(input){
+ const f=input.files[0];if(!f)return;
+ const image=new Image(),reader=new FileReader();
+ reader.onload=()=>{image.onload=()=>{
+ const canvas=document.createElement("canvas");
+ const scale=Math.min(1,850/Math.max(image.width,image.height));
+ canvas.width=Math.round(image.width*scale);
+ canvas.height=Math.round(image.height*scale);
+ canvas.getContext("2d").drawImage(image,0,0,canvas.width,canvas.height);
+ photo=canvas.toDataURL("image/jpeg",.7);
+ };image.src=reader.result};
+ reader.readAsDataURL(f);
+}
+$("form").addEventListener("submit",e=>{
+ e.preventDefault();
+ const values=Object.fromEntries(new FormData(e.target).entries());
+ delete values.photo;
+ if(photo)values.photo=photo;
+ if(editing){
+ const x=data[kind].find(x=>x.id===editing);
+ Object.assign(x,values);
+ }else{
+ values.id=uid();
+ if(kind==="inventory")values.code=values.holiday.slice(0,1).toUpperCase()+"-"+String(data.inventory.length+1).padStart(3,"0");
+ if(kind==="tasks")values.done=false;
+ data[kind].push(values);
+ }
+ $("dialog").close();save();render();
+});
+function removeItem(type,id){
+ if(!confirm("Delete this item?"))return;
+ data[type]=data[type].filter(x=>x.id!==id);save();render();
+}
+const views={
+ Dashboard:dashboard,Inventory:inventory,Rooms:roomView,Storage:storage,
+ Planner:planner,Packing:packing,Lights:lights,Calendar:calendar,
+ Tasks:tasks,Wishlist:wishlist,Budget:budget,Memories:memories,Settings:settings
+};
+changeTheme(data.theme);
+const requestedBin=new URLSearchParams(location.search).get("bin");
+if(requestedBin){
+ const b=data.bins.find(x=>x.id===requestedBin);
+ if(b){navigate("Storage");setTimeout(()=>showShelf(Number(b.shelf)),100)}
+}
+</script>
+</body>
+</html>
